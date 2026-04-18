@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Airplane Slalom</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a1020;
+      --panel: rgba(10, 18, 34, 0.88);
+      --line: rgba(255, 255, 255, 0.12);
+      --text: #edf5ff;
+      --muted: #9fb5d4;
+      --accent: #ffb703;
+      --accent-2: #6ee7ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      color: var(--text);
+      background: linear-gradient(180deg, #23361f 0%, #0f1a14 100%);
+    }
+
+    .shell {
+      width: min(920px, 100%);
+      padding: 22px;
+      border-radius: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 5vw, 44px);
+    }
+
+    .subtext {
+      margin: 8px 0 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .stats {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .stat {
+      min-width: 110px;
+      padding: 10px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .stat-value {
+      margin-top: 6px;
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .message {
+      color: var(--accent);
+      font-weight: bold;
+      min-height: 1.4em;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      background: linear-gradient(135deg, var(--accent), #fb8500);
+      color: #111827;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    canvas {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: linear-gradient(180deg, #6e8f44 0%, #45682a 100%);
+    }
+
+    .controls {
+      margin-top: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .controls strong {
+      color: var(--text);
+    }
+
+    @media (max-width: 640px) {
+      .shell {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="header">
+      <div>
+        <h1>Airplane Slalom</h1>
+        <p class="subtext">Steer with the left and right arrow keys and fly up the course through flag gates.</p>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">Score</div>
+          <div class="stat-value" id="score">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Flag</div>
+          <div class="stat-value" id="flag-count">1</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Misses</div>
+          <div class="stat-value" id="misses">0/5</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hud">
+      <div class="message" id="message">Fly between the flags to begin.</div>
+      <button id="restart-btn" type="button">Start/Restart</button>
+    </div>
+
+    <canvas id="game" width="860" height="520" aria-label="Biplane game area" tabindex="0"></canvas>
+
+    <p class="controls">
+      <strong>Controls:</strong> Press `Left Arrow` and `Right Arrow` to steer the biplane.
+      Stay centered and fly between each pair of flags as the course scrolls toward you.
+    </p>
+  </main>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+    const flagCountEl = document.getElementById("flag-count");
+    const missesEl = document.getElementById("misses");
+    const messageEl = document.getElementById("message");
+    const restartBtn = document.getElementById("restart-btn");
+    const planeSprite = new Image();
+    const trafficPlaneSprite = new Image();
+    const engineHum = new Audio("../sounds/engine-hum.mp3");
+    const backgroundTrack = new Audio("../sounds/game-music-loop-3.mp3");
+    const swooshSound = new Audio("../sounds/swoosh.mp3");
+    const knockSound = new Audio("../sounds/knock.mp3");
+    const crashSound = new Audio("../sounds/car-crash.mp3");
+    const trafficEngineSound = new Audio("../sounds/car-engine.mp3");
+    planeSprite.src = "../art/Hawker_type1.png";
+    trafficPlaneSprite.src = "../art/Biploar_type2_1.png";
+    engineHum.loop = true;
+    backgroundTrack.loop = true;
+    trafficEngineSound.loop = true;
+    engineHum.volume = 0.38;
+    backgroundTrack.volume = 0.12;
+    swooshSound.volume = 0.5;
+    knockSound.volume = 0.55;
+    crashSound.volume = 0.65;
+    trafficEngineSound.volume = 0.06336;
+
+    const keys = { left: false, right: false };
+    let score = 0;
+    let flagNumber = 1;
+
+    const plane = {
+      x: canvas.width / 2,
+      y: canvas.height - 88,
+      width: 85.8,
+      height: 85.8,
+      speed: 5.2,
+      bank: 0
+    };
+
+    let gate = null;
+    let trafficPlanes = [];
+    let fields = [];
+    const basePlaneSpeed = 5.2;
+    const baseGateSpeed = 3.4;
+    const baseGapMin = 150;
+    const baseGapMax = 210;
+    let audioStarted = false;
+    let paused = false;
+    let started = false;
+    let gameOver = false;
+    let misses = 0;
+    let elapsedPlayMs = 0;
+    let lastFrameTime = 0;
+    let nextTrafficSpawnMs = 0;
+
+    function getSpeedMultiplier() {
+      return Math.pow(1.1, Math.floor(elapsedPlayMs / 5000));
+    }
+
+    function getCurrentPlaneSpeed() {
+      return basePlaneSpeed * getSpeedMultiplier();
+    }
+
+    function getCurrentGateSpeed() {
+      return baseGateSpeed * getSpeedMultiplier();
+    }
+
+    function getGapMultiplier() {
+      return Math.pow(0.9, Math.floor(elapsedPlayMs / 10000));
+    }
+
+    function getCurrentGapRange() {
+      const multiplier = getGapMultiplier();
+      return {
+        min: Math.max(70, baseGapMin * multiplier),
+        max: Math.max(100, baseGapMax * multiplier)
+      };
+    }
+
+    function randomBetween(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function formatElapsedTime(ms) {
+      const totalSeconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${minutes}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    function startAudio() {
+      Promise.allSettled([
+        engineHum.play(),
+        backgroundTrack.play()
+      ]).then((results) => {
+        audioStarted = results.some((result) => result.status === "fulfilled");
+      });
+    }
+
+    function playSwoosh() {
+      swooshSound.currentTime = 0;
+      swooshSound.play().catch(() => {});
+    }
+
+    function playKnock() {
+      knockSound.currentTime = 0;
+      knockSound.play().catch(() => {});
+    }
+
+    function playCrash() {
+      crashSound.currentTime = 0;
+      crashSound.play().catch(() => {});
+    }
+
+    function syncTrafficAudio() {
+      if (started && !paused && trafficPlanes.length > 0) {
+        trafficEngineSound.play().catch(() => {});
+      } else {
+        trafficEngineSound.pause();
+        trafficEngineSound.currentTime = 0;
+      }
+    }
+
+    function updatePauseMessage() {
+      if (paused) {
+        messageEl.textContent = "Paused. Press Space to resume.";
+      }
+    }
+
+    function startGame() {
+      keys.left = false;
+      keys.right = false;
+      started = true;
+      gameOver = false;
+      paused = false;
+      startAudio();
+      messageEl.textContent = "Fly between the flags to begin.";
+    }
+
+    function togglePause() {
+      if (gameOver) {
+        return;
+      }
+
+      paused = !paused;
+
+      if (paused) {
+        keys.left = false;
+        keys.right = false;
+        engineHum.pause();
+        backgroundTrack.pause();
+        trafficEngineSound.pause();
+      } else {
+        startAudio();
+        syncTrafficAudio();
+        if (score === 0 && flagNumber === 1) {
+          messageEl.textContent = "Fly between the flags to begin.";
+        } else {
+          messageEl.textContent = `Back in the air. Head for gate ${flagNumber}.`;
+        }
+      }
+
+      updatePauseMessage();
+    }
+
+    function normalizeDirectionKey(key) {
+      if (key === "ArrowLeft" || key === "Left") {
+        return "left";
+      }
+      if (key === "ArrowRight" || key === "Right") {
+        return "right";
+      }
+      return null;
+    }
+
+    function spawnFields() {
+      fields = Array.from({ length: 14 }, (_, index) => ({
+        x: randomBetween(0, canvas.width - 180),
+        y: index * 56 - 40,
+        width: randomBetween(110, 240),
+        height: randomBetween(34, 64),
+        color: ["#6b8e23", "#7fa34a", "#8a6d3b", "#4f7d39"][index % 4],
+        detail: Math.floor(randomBetween(3, 7))
+      }));
+    }
+
+    function spawnGate(startAboveScreen = true) {
+      const gapRange = getCurrentGapRange();
+      const gapWidth = randomBetween(gapRange.min, gapRange.max);
+      const centerX = randomBetween(180, canvas.width - 180);
+      gate = {
+        y: startAboveScreen ? -90 : canvas.height * 0.3,
+        gapCenter: centerX,
+        gapWidth,
+        poleHeight: 74,
+        flagWidth: 42,
+        leftColor: "#dc2626",
+        rightColor: "#16a34a",
+        scored: false
+      };
+      flagCountEl.textContent = flagNumber;
+    }
+
+    function scheduleNextTrafficSpawn() {
+      if (trafficPlanes.length === 0) {
+        nextTrafficSpawnMs = elapsedPlayMs + randomBetween(2200, 4200);
+      } else {
+        nextTrafficSpawnMs = elapsedPlayMs + randomBetween(1800, 3600);
+      }
+    }
+
+    function spawnTrafficPlane() {
+      trafficPlanes.push({
+        x: trafficPlanes.length === 0
+          ? randomBetween(120, canvas.width - 120)
+          : randomBetween(80, canvas.width - 80),
+        y: -110,
+        width: 95.76,
+        height: 95.76,
+        speed: getCurrentGateSpeed() * 1.3,
+        bank: randomBetween(-0.08, 0.08)
+      });
+      scheduleNextTrafficSpawn();
+      syncTrafficAudio();
+    }
+
+    function resetGame() {
+      score = 0;
+      flagNumber = 1;
+      misses = 0;
+      plane.x = canvas.width / 2;
+      plane.y = canvas.height - 88;
+      plane.speed = basePlaneSpeed;
+      plane.bank = 0;
+      scoreEl.textContent = score;
+      missesEl.textContent = "0/5";
+      messageEl.textContent = "Press Spacebar to start.";
+      paused = false;
+      started = false;
+      gameOver = false;
+      elapsedPlayMs = 0;
+      lastFrameTime = 0;
+      trafficPlanes = [];
+      nextTrafficSpawnMs = 0;
+      trafficEngineSound.pause();
+      trafficEngineSound.currentTime = 0;
+      spawnFields();
+      spawnGate(false);
+      scheduleNextTrafficSpawn();
+      canvas.focus();
+    }
+
+    function endGame() {
+      started = false;
+      paused = false;
+      gameOver = true;
+      keys.left = false;
+      keys.right = false;
+      engineHum.pause();
+      backgroundTrack.pause();
+      trafficEngineSound.pause();
+      trafficEngineSound.currentTime = 0;
+      messageEl.textContent = `Game over! Time: ${formatElapsedTime(elapsedPlayMs)}. Press Restart to try again.`;
+    }
+
+    function endGameWithMessage(message) {
+      started = false;
+      paused = false;
+      gameOver = true;
+      keys.left = false;
+      keys.right = false;
+      engineHum.pause();
+      backgroundTrack.pause();
+      trafficEngineSound.pause();
+      trafficEngineSound.currentTime = 0;
+      messageEl.textContent = `${message} Time: ${formatElapsedTime(elapsedPlayMs)}. Press Restart to try again.`;
+    }
+
+    function registerMiss(message) {
+      misses += 1;
+      missesEl.textContent = `${misses}/5`;
+      messageEl.textContent = message;
+      playKnock();
+
+      if (misses >= 5) {
+        endGame();
+      } else {
+        spawnGate();
+      }
+    }
+
+    function drawBackground() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#5f8440";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      fields.forEach((field) => {
+        if (started && !paused) {
+          field.y += getCurrentGateSpeed();
+          if (field.y > canvas.height + 30) {
+            field.y = -field.height - randomBetween(20, 70);
+            field.x = randomBetween(0, canvas.width - 180);
+            field.width = randomBetween(110, 240);
+            field.height = randomBetween(34, 64);
+            field.color = ["#6b8e23", "#7fa34a", "#8a6d3b", "#4f7d39"][Math.floor(randomBetween(0, 4))];
+            field.detail = Math.floor(randomBetween(3, 7));
+          }
+        }
+
+        ctx.fillStyle = field.color;
+        ctx.fillRect(field.x, field.y, field.width, field.height);
+
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.14)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(field.x, field.y, field.width, field.height);
+
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+        for (let i = 1; i < field.detail; i += 1) {
+          const lineY = field.y + (field.height / field.detail) * i;
+          ctx.beginPath();
+          ctx.moveTo(field.x, lineY);
+          ctx.lineTo(field.x + field.width, lineY);
+          ctx.stroke();
+        }
+      });
+
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+      ctx.lineWidth = 2;
+      for (let x = 0; x <= canvas.width; x += 86) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+    }
+
+    function drawSingleFlag(x, y, direction, color) {
+      ctx.save();
+      ctx.translate(x, y);
+
+      ctx.save();
+      ctx.translate(14, 48);
+      ctx.rotate((130 * Math.PI) / 180);
+      ctx.scale(direction, 1);
+      ctx.scale(-0.5, 0.5);
+      ctx.globalAlpha = 0.07;
+      ctx.fillStyle = "black";
+      ctx.beginPath();
+      ctx.moveTo(0, -gate.poleHeight / 2);
+      ctx.lineTo(gate.flagWidth, -gate.poleHeight / 2 + 14);
+      ctx.lineTo(0, -gate.poleHeight / 2 + 28);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(-2, -gate.poleHeight / 2, 4, gate.poleHeight);
+      ctx.restore();
+
+      ctx.scale(direction, 1);
+
+      ctx.strokeStyle = "#4b5563";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, -gate.poleHeight / 2);
+      ctx.lineTo(0, gate.poleHeight / 2);
+      ctx.stroke();
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(0, -gate.poleHeight / 2);
+      ctx.lineTo(gate.flagWidth, -gate.poleHeight / 2 + 14);
+      ctx.lineTo(0, -gate.poleHeight / 2 + 28);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawGate() {
+      const leftX = gate.gapCenter - gate.gapWidth / 2;
+      const rightX = gate.gapCenter + gate.gapWidth / 2;
+      drawSingleFlag(leftX, gate.y, 1, gate.leftColor);
+      drawSingleFlag(rightX, gate.y, -1, gate.rightColor);
+    }
+
+    function drawPlane() {
+      ctx.save();
+      ctx.translate(plane.x, plane.y);
+
+      ctx.save();
+      ctx.translate(10, 14);
+      ctx.rotate(plane.bank * 0.35);
+      ctx.globalAlpha = 0.22;
+      if (planeSprite.complete && planeSprite.naturalWidth > 0) {
+        ctx.filter = "brightness(0)";
+        ctx.drawImage(
+          planeSprite,
+          -plane.width / 2,
+          -plane.height / 2,
+          plane.width,
+          plane.height
+        );
+        ctx.filter = "none";
+      } else {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.9)";
+        ctx.fillRect(-22, -10, 44, 20);
+        ctx.fillRect(-12, -26, 24, 52);
+      }
+      ctx.restore();
+
+      ctx.rotate(plane.bank);
+      if (planeSprite.complete && planeSprite.naturalWidth > 0) {
+        ctx.drawImage(
+          planeSprite,
+          -plane.width / 2,
+          -plane.height / 2,
+          plane.width,
+          plane.height
+        );
+      } else {
+        ctx.fillStyle = "#ffd166";
+        ctx.fillRect(-22, -10, 44, 20);
+
+        ctx.fillStyle = "#e63946";
+        ctx.fillRect(-12, -26, 24, 52);
+
+        ctx.fillStyle = "#1d3557";
+        ctx.fillRect(-4, -38, 8, 24);
+        ctx.fillRect(-4, 14, 8, 20);
+      }
+
+      ctx.restore();
+    }
+
+    function drawTrafficPlanes() {
+      trafficPlanes.forEach((trafficPlane) => {
+        ctx.save();
+        ctx.translate(trafficPlane.x, trafficPlane.y);
+
+        ctx.save();
+        ctx.translate(8, 12);
+        ctx.rotate(Math.PI + trafficPlane.bank * 0.35);
+        ctx.globalAlpha = 0.18;
+        if (trafficPlaneSprite.complete && trafficPlaneSprite.naturalWidth > 0) {
+          ctx.filter = "brightness(0)";
+          ctx.drawImage(
+            trafficPlaneSprite,
+            -trafficPlane.width / 2,
+            -trafficPlane.height / 2,
+            trafficPlane.width,
+            trafficPlane.height
+          );
+          ctx.filter = "none";
+        }
+        ctx.restore();
+
+        ctx.rotate(Math.PI + trafficPlane.bank);
+        if (trafficPlaneSprite.complete && trafficPlaneSprite.naturalWidth > 0) {
+          ctx.drawImage(
+            trafficPlaneSprite,
+            -trafficPlane.width / 2,
+            -trafficPlane.height / 2,
+            trafficPlane.width,
+            trafficPlane.height
+          );
+        } else {
+          ctx.fillStyle = "#9ca3af";
+          ctx.fillRect(-20, -10, 40, 20);
+          ctx.fillStyle = "#475569";
+          ctx.fillRect(-10, -24, 20, 48);
+        }
+
+        ctx.restore();
+      });
+    }
+
+    function updatePlane() {
+      plane.speed = getCurrentPlaneSpeed();
+
+      if (keys.left) {
+        plane.x -= plane.speed;
+        plane.bank = -0.18;
+      }
+      if (keys.right) {
+        plane.x += plane.speed;
+        plane.bank = 0.18;
+      }
+      if (!keys.left && !keys.right) {
+        plane.bank *= 0.82;
+      }
+
+      if (plane.x < plane.width / 2 + 10) {
+        plane.x = plane.width / 2 + 10;
+      }
+      if (plane.x > canvas.width - plane.width / 2 - 10) {
+        plane.x = canvas.width - plane.width / 2 - 10;
+      }
+
+      gate.y += getCurrentGateSpeed();
+    }
+
+    function updateTrafficPlanes() {
+      if (trafficPlanes.length < 2 && elapsedPlayMs >= nextTrafficSpawnMs) {
+        spawnTrafficPlane();
+      }
+
+      trafficPlanes.forEach((trafficPlane) => {
+        trafficPlane.y += trafficPlane.speed;
+      });
+
+      const visibleTraffic = trafficPlanes.filter((trafficPlane) => trafficPlane.y <= canvas.height + 120);
+      if (visibleTraffic.length !== trafficPlanes.length) {
+        trafficPlanes = visibleTraffic;
+        syncTrafficAudio();
+      }
+    }
+
+    function checkGateState() {
+      const gatePassedPlane = gate.y > plane.y + plane.height / 2;
+
+      if (gatePassedPlane && !gate.scored) {
+        const insideGap =
+          plane.x > gate.gapCenter - gate.gapWidth / 2 + 12 &&
+          plane.x < gate.gapCenter + gate.gapWidth / 2 - 12;
+
+        gate.scored = true;
+
+        if (insideGap) {
+          score += 1;
+          flagNumber += 1;
+          scoreEl.textContent = score;
+          messageEl.textContent = `Nice flying! Head for gate ${flagNumber}.`;
+          playSwoosh();
+          spawnGate();
+        } else {
+          registerMiss("Missed the gap. Line up for the next gate.");
+        }
+      }
+
+      const gateTouchesPlane =
+        Math.abs(gate.y - plane.y) < 22 &&
+        (plane.x <= gate.gapCenter - gate.gapWidth / 2 + 8 ||
+          plane.x >= gate.gapCenter + gate.gapWidth / 2 - 8);
+
+      if (gateTouchesPlane) {
+        registerMiss("Too close to the flags. Try the next gate.");
+      }
+    }
+
+    function checkTrafficCollision() {
+      for (const trafficPlane of trafficPlanes) {
+        const dx = plane.x - trafficPlane.x;
+        const dy = plane.y - trafficPlane.y;
+        const hitDistance = (plane.width + trafficPlane.width) * 0.32;
+
+        if (Math.hypot(dx, dy) < hitDistance) {
+          playCrash();
+          endGameWithMessage("Mid-air collision! Game over.");
+          return;
+        }
+      }
+    }
+
+    function loop(timestamp) {
+      if (lastFrameTime === 0) {
+        lastFrameTime = timestamp;
+      }
+
+      const delta = timestamp - lastFrameTime;
+      lastFrameTime = timestamp;
+
+      if (started && !paused) {
+        elapsedPlayMs += delta;
+      }
+
+      drawBackground();
+      if (started && !paused) {
+        updatePlane();
+        updateTrafficPlanes();
+      }
+      drawGate();
+      drawTrafficPlanes();
+      drawPlane();
+      if (started && !paused) {
+        checkGateState();
+        checkTrafficCollision();
+      }
+
+      if (started && !paused && gate.y > canvas.height + 100) {
+        spawnGate();
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    function handleKeyChange(event, isPressed) {
+      const direction = normalizeDirectionKey(event.key);
+      if (!direction) {
+        return;
+      }
+
+      keys[direction] = isPressed;
+      event.preventDefault();
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === " " || event.code === "Space" || event.key === "Spacebar") {
+        if (event.repeat) {
+          event.preventDefault();
+          return;
+        }
+
+        if (!started && !gameOver) {
+          startGame();
+        } else if (started) {
+          togglePause();
+        }
+        event.preventDefault();
+        return;
+      }
+
+      if (!started) {
+        return;
+      }
+
+      startAudio();
+      handleKeyChange(event, true);
+    });
+
+    document.addEventListener("keyup", (event) => {
+      handleKeyChange(event, false);
+    });
+
+    window.addEventListener("blur", () => {
+      keys.left = false;
+      keys.right = false;
+      if (started && !paused) {
+        paused = true;
+        engineHum.pause();
+        backgroundTrack.pause();
+        updatePauseMessage();
+      }
+    });
+
+    canvas.addEventListener("click", () => {
+      canvas.focus();
+      startAudio();
+    });
+
+    restartBtn.addEventListener("click", () => {
+      startAudio();
+      resetGame();
+    });
+
+    resetGame();
+    loop();
+  </script>
+</body>
+</html>
